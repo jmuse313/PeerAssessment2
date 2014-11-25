@@ -1,24 +1,59 @@
+---
+title: 'Reproducible Research:  Peer Assesment 2'
+author: "jmuse313"
+date: "11/19/2014"
+output:
+  html_document:
+    css: styles.css
+---
+
+##Introduction
+
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+##Data
+
+The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete.
+
+###Title: Your document should have a title that briefly summarizes your data analysis
+
+###Synopsis: Immediately after the title, there should be a synopsis which describes and summarizes your analysis in at most 10 complete sentences.
+
+### Data Processing: There should be a section titled Data Processing which describes (in words and code) how the data were loaded into R and processed for analysis. In particular, your analysis must start from the raw CSV file containing the data. You cannot do any preprocessing outside the document. If preprocessing is time-consuming you may consider using the cache = TRUE option for certain code chunks.
+
+```{r, cache=TRUE}
 setwd("~/Documents/Coursera/5_ReproducibleResearch/PeerAssessment2")
 
-#Download the zipped file to a temporary location, load the data
-temp <- tempfile()
-link <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
-download.file(link, temp, method = "curl")
-data <- read.csv(bzfile(temp))
-unlink(temp)
+#This section downloads the data and writes the data to a csv. Because the datafile is quite large, 
+#I have commented this section out and start with uploading the csv that was previously created.
+#temp <- tempfile()
+#link <- "https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2FStormData.csv.bz2"
+#download.file(link, temp, method = "curl")
+#data <- read.csv(bzfile(temp))
+#unlink(temp)
+#write.csv(data, file = "StormData.csv", row.names = FALSE) 
 
-#Create a local copy of data
-write.csv(data, file = "StormData.csv", row.names = FALSE) 
+#Load data
 data <- read.csv("StormData.csv")
+```
 
+```{r}
 #Libraries used:
 library(lattice)
+library(ggplot2)
 library(stringdist)
 library(maps)
 library(mapdata)
 library(scales)
-library(xtable)
+library(knitr)
+library(shapefiles)
+library(rgdal)
+```
 
+
+```{r, cache=TRUE}
 #Data Processing
 
 #Create a vector of Event Types as they are classified in the National Weather Service Documentation
@@ -30,9 +65,13 @@ ColsInt <- c("STATE", "EVTYPE", "MAG", "FATALITIES", "INJURIES", "PROPDMG", "PRO
              "CROPDMGEXP", "LATITUDE", "LONGITUDE")
 SubData <- data[,ColsInt]
 
-#Review unique EVTYPE
+#Review unique EVTYPE for basic idea of what data processing should occur
 UniqueEvts <- unique(SubData$EVTYPE)
+```
 
+
+
+```{r, cache=TRUE}
 ##This section processes the data based on the initial visual inspection of the unique EVTYPE values
 #everything to uppercase
 SubData$EVTYPE <- toupper(SubData$EVTYPE)
@@ -87,7 +126,9 @@ hurricane <- function(evtypes) {
     evtypes
 }
 SubData$EVTYPE <- hurricane(SubData$EVTYPE)
+```
 
+```{r, cache=TRUE}
 #This section loops through each unique event type in the data and uses stringdist to compare them
 #to the event types listed in the NOAA's NWS Documentation (found at http://www.ncdc.noaa.gov/
 #stormevents/pd01016005curr.pdf).  The Optimal String Alignment distance (osa) counts the number of 
@@ -166,9 +207,7 @@ SubData[(SubData$EVTYPE == "WIND" & SubData$MAG > 50),]$EVTYPE <- "HIGH WIND"
 SubData[(SubData$EVTYPE == "WIND" & SubData$MAG <= 50),]$EVTYPE <- "STRONG WIND"
 
 
-
 #Count the number of observations in SubData at this point that have a stringdist of three or more
-
 #Re-calculate the string distances
 
 UniqueEvt <- unique(SubData$EVTYPE)
@@ -208,6 +247,15 @@ SubData <- SubData[(!(SubData$EVTYPE %in% DiffEvts3up$EVTYPE)),]
 
 UnqFreq <- as.data.frame(table(SubData$EVTYPE))
 
+```
+
+##Questions
+
+1. Across the United States, which types of events (as indicated in the EVTYPE variable) are most harmful with respect to population health?
+
+2. Across the United States, which types of events have the greatest economic consequences?
+
+```{r}
 #Questions: 
 
     # 1. Across the United States, which types of events (as indicated in the EVTYPE variable) are
@@ -226,67 +274,37 @@ TopTen <- cbind(Fatalities[c(1:10),], Injuries[c(1:10),])
 kable(head(TopTen, n=10), format = "html", row.names = FALSE, 
       col.names = c("Event Type", "Total Fatalities", "Event Type", "Total Injuries"), 
       align = c("l", "c", "l", "c"), 
-      caption = c("Top Ten Event Types that are Most Harmful to Human Health Across the U.S."))
+      caption = c("Top Ten Event Types that are Most Harmful to Human Health in the US"))
+```
 
-#State names and abbrivations from the US Census Bureau at 
-#http://www.census.gov/geo/reference/docs/state.txt
-StatesCensus <- read.table("state.txt", header = TRUE, sep = "|")
-names(StatesCensus) <- c("STATE_CODE", "STATE", "STATE_NAME", "STATENS")
+```{r}
+#Download Shapefile for creating a US map with states and territories 
+temp <- tempfile()
+link <- "http://www.nws.noaa.gov/geodata/catalog/national/data/s_04jn14.zip"
+download.file(link, temp, method = "curl")
+shape <- read.shapefile(unz(temp))
+unlink(temp)
+write.shapefile(shape, "usShapeFile")
 
 FatalState <- aggregate(FATALITIES~STATE + EVTYPE, data = SubData, sum)
 FatalState.agg <- aggregate(FATALITIES~STATE, data=FatalState, max)
 FatalState.max <- merge(FatalState.agg, FatalState)
 
-#Merge the Maximum dataset to the US Census Bureau state data based on the State abbrevations 
-FatalState.max <- merge(FatalState.max, StatesCensus, by = "STATE")
-ForMapFtSt.max <- FatalState.max
-ForMapFtSt.max$STATE_NAME <- tolower(ForMapFtSt.max$STATE_NAME)
-
-library(ggplot2)
-if (require("maps")) {
-    states <- map_data("state")
-    names(states) <- c("long", "lat", "group", "order","STATE_NAME", "subregion")
-    choro <- merge(ForMapFtSt.max, states, sort = FALSE, by = "STATE_NAME")
-    choro <- choro[order(choro$order), ]
-    mapping <- qplot(long, lat, data = choro, group = group, fill = EVTYPE, 
-                     geom = "polygon", alpha = FATALITIES)
-    mapping + 
-        scale_fill_brewer(palette="Spectral") + 
-        scale_alpha(range=c(0.5,1.0), limits=c(0, 500))
-}
-NonLower48F <- FatalState.max[!(ForMapFtSt.max$STATE_NAME %in% states$STATE_NAME),]
-NonLower48F <- NonLower48F[,c(5, 3, 2)]
-kable(head(NonLower48F, n=nrow(NonLower48F)), format = "html", row.names = FALSE, 
-      col.names = c("State or Territory", "Event Type", "Total Fatalities",), 
-      align = c("l", "l", "c"), 
-      caption = c("Total Fatalities by Event Type for Regions not included in Map"))
-
 InjState <- aggregate(INJURIES~STATE + EVTYPE, data = SubData, sum)
-InjState.agg <- aggregate(INJURIES~STATE, data=InjState, max)
-InjState.max <- merge(InjState.agg, InjState)
 
-#Merge the Maximum dataset to the US Census Bureau state data based on the State abbrevations 
-InjState.max <- merge(InjState.max, StatesCensus, by = "STATE")
-ForMapIjSt.max <- InjState.max
-ForMapIjSt.max$STATE_NAME <- tolower(ForMapIjSt.max$STATE_NAME)
 
-library(ggplot2)
-if (require("maps")) {
-    states <- map_data("state")
-    names(states) <- c("long", "lat", "group", "order","STATE_NAME", "subregion")
-    choro <- merge(ForMapIjSt.max, states, sort = FALSE, by = "STATE_NAME")
-    choro <- choro[order(choro$order), ]
-    mapping <- qplot(long, lat, data = choro, group = group, fill = EVTYPE,
-                     geom = "polygon", alpha = INJURIES)
-    mapping + 
-        scale_fill_brewer(palette="Spectral") + 
-        scale_alpha(range=c(0.5,1.0), limits=c(500, 5000))
-} 
-NonLower48I <- InjState.max[!(ForMapIjSt.max$STATE_NAME %in% states$STATE_NAME),]
-NonLower48I <- NonLower48I[,c(5, 3, 2)]
-kable(head(NonLower48I, n=nrows(NonLower48I)), format = "html", row.names = FALSE, 
-      col.names = c("State or Territory", "Event Type", "Total Injuries",), 
-      align = c("l", "l", "c"), 
-      caption = c("Total Injuries by Event Type for Regions not included in Map"))
 
-    # 2. Across the United States, which types of events have the greatest economic consequences?
+```
+
+
+
+
+```{r}
+# 2. Across the United States, which types of events have the greatest economic consequences?
+```
+
+### Results: There should be a section titled Results in which your results are presented.
+
+The analysis document must have at least one figure containing a plot.  Your analyis must have no more than three figures. Figures may have multiple plots in them (i.e. panel plots), but there cannot be more than three figures total.
+
+You must show all your code for the work in your analysis document. This may make the document a bit verbose, but that is okay. In general, you should ensure that echo = TRUE for every code chunk (this is the default setting in knitr).
